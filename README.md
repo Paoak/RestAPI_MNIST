@@ -27,7 +27,6 @@
 - Переводим метки в формат one-hot.
 - Строим простую нейросеть: Flatten → Dense(128) → Dense(10).
 - Обучаем модель 10 эпох и сохраняем в файл mnist_model.h5.
-- 
 ```python
 # Для загрузки и дальнейшей работы, создаём простейшую модель классификации цифр MNIST
 
@@ -150,9 +149,11 @@ async def clear_history():
 
 - nohup и & — запускают сервер в фоне (чтобы не блокировал ячейки).
 - --reload — автообновление при изменении кода.
-- 
 ```bash
+# локальный запуск
 !nohup uvicorn main:app --reload &
+# nohup и & - прописываются для запуска процесса в фоне (чтобы не блокировать Colab)
+# параметр --reload позволяет автоматически перезапускать uvicorn при изменениях в файле main.py
 !cat nohup.out
 ```
 
@@ -163,7 +164,6 @@ async def clear_history():
 - Отображение изображения с фактической меткой
 - Получение истории /history
 - Очистка истории /history (DELETE)
-
 ```python
 import requests
 
@@ -179,50 +179,92 @@ import numpy as np
 import matplotlib.pyplot as plt
 import random
 
+# ПРОВЕРКА МОДЕЛИ НА СЛУЧАЙНОМ ЧИСЛЕ
+# Загружаем данные
 (_, _), (x_test, y_test) = mnist.load_data()
+
+# Выбираем случайное изображение
 idx = np.random.randint(0, len(x_test))
 img_array = (x_test[idx] * 255).astype(np.uint8)
 img = Image.fromarray(img_array)
 img.save("test_digit.png")
 
+# Отображаем изображение
+plt.imshow(img_array, cmap="gray")
+plt.title(f"Ожидаемая метка: {y_test[idx]}")
+plt.axis("off")
+plt.show()
+
+# Отправка изображения и метки на сервер
 with open("test_digit.png", "rb") as f:
-    res = requests.post("http://127.0.0.1:8000/predict", files={"file": f}, data={"true_label": int(y_test[idx])})
-    print(res.json())
+    res = requests.post(
+        "http://127.0.0.1:8000/predict",
+        files={"file": f},
+        data={"true_label": int(y_test[idx])}
+    )
+
+# Вывод результата
+print("\nПредсказание от модели:", res.json())
+print("Ожидаемая метка (из теста):", int(y_test[idx]))
 ```
 
 Получение и очистка истории:
 
 ```python
-requests.get("http://127.0.0.1:8000/history").json()
-requests.delete("http://127.0.0.1:8000/history").json()
+# Запрос истории предсказаний
+history = requests.get("http://127.0.0.1:8000/history").json()
+print("\nИстория предсказаний:")
+for item in history:
+    print(f"Ожидаемая метка: {item['true_label']} — Предсказание: {item['predicted']}")
+
+# Очиcтить историю можно следующим образом
+res = requests.delete("http://127.0.0.1:8000/history")
+print("Очистка истории:", res.json())
 ```
 
 ### 6. Публикация через Serveo
-
+- Устанавливает SSH-туннель localhost:8000 → https://***.serveo.net
+- Автоматически извлекает ссылку из вывода
+- Показывает ссылку на:
+- - документацию: https://xxxx.serveo.net/docs
+- - историю: https://xxxx.serveo.net/history
 ```python
+# запуск с помощью serveo.net
+#!ssh -o "StrictHostKeyChecking no" -R 80:localhost:8000 serveo.net
+# !ssh -o "StrictHostKeyChecking no" -R 80:localhost:8000 nokey@localhost.run # альтернатива
+
 import subprocess
 import re
 import time
 
-proc = subprocess.Popen([
-    "ssh", "-o", "StrictHostKeyChecking=no", "-R", "80:localhost:8000", "serveo.net"
-], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+# Запускаем SSH в фоне
+proc = subprocess.Popen(
+    ["ssh", "-o", "StrictHostKeyChecking=no", "-R", "80:localhost:8000", "serveo.net"],
+    stdout=subprocess.PIPE,
+    stderr=subprocess.STDOUT,
+    text=True
+)
+
+# Ждем и читаем вывод
+print("Ожидание ссылки от Serveo...")
 
 url = None
-for i in range(30):
+for i in range(30):  # максимум ~30 секунд ожидания
     line = proc.stdout.readline()
     print(line.strip())
+
     match = re.search(r"https://[a-z0-9]+\.serveo\.net", line)
     if match:
         url = match.group(0)
         break
     time.sleep(1)
 
+# Выводим ссылки на документацию и историю запросов
 if url:
-    print(f"\nДокументация API: {url}/docs")
+    print(f"\nДокументация доступна по адресу: {url}/docs")
     print(f"История запросов: {url}/history")
 else:
-    print("Не удалось получить ссылку от Serveo")
+    print("Не удалось найти ссылку Serveo.")
 ```
 
 ---
