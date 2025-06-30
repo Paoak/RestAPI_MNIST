@@ -57,24 +57,45 @@ model.save("mnist_model.h5")
 ```
 
 ### 2. Установка зависимостей
-
+- FastAPI — фреймворк для API.
+- uvicorn — сервер для запуска API.
+- python-multipart — для обработки форм с файлами(необходимо для FAST API).
 ```bash
 !pip install fastapi uvicorn python-multipart
 ```
 
 ### 3. Создание API (main.py)
 
+Маршруты:
+- GET /health — проверка, работает ли API
+- POST /predict — принимает изображение PNG + метку, возвращает предсказание
+- GET /history — показывает все предсказания
+- DELETE /history — очищает историю
+
+Ключевые моменты:
+- Загрузка модели mnist_model.h5
+- Предобработка изображения: 28x28, оттенки серого, нормализация
+- Используется request_history — список словарей с предсказаниями
 ```python
+%%writefile main.py
+
+import numpy as np
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
+from typing import List
 from tensorflow.keras.models import load_model
 from PIL import Image
-import numpy as np
-from typing import List
-from pydantic import BaseModel
+import io
 
-app = FastAPI(title="MNIST Predictor API")
+app = FastAPI(
+    title="MNIST Predictor API",
+    description="REST API для предсказания цифр с изображений MNIST и ведения истории запросов")
+
+# Загружаем обученную модель
 model = load_model("mnist_model.h5")
+
+# Примитивная "база данных" — история запросов
 request_history = []
 
 class PredictionRecord(BaseModel):
@@ -82,11 +103,15 @@ class PredictionRecord(BaseModel):
     true_label: int
     predicted: int
 
-@app.get("/health")
+@app.get("/health",
+         summary="Проверка работоспособности",
+         description="Простой тест, чтобы убедиться, что API запущен и работает")
 async def health():
     return {"status": "API работает корректно"}
 
-@app.post("/predict")
+@app.post("/predict",
+          summary="Предсказание по изображению",
+          description="Принимает PNG-изображение цифры 0-9 и возвращает предсказание модели")
 async def predict(file: UploadFile = File(...), true_label: int = Form(...)):
     try:
         image = Image.open(file.file).convert("L").resize((28, 28))
@@ -95,6 +120,7 @@ async def predict(file: UploadFile = File(...), true_label: int = Form(...)):
         prediction = model.predict(image)
         predicted_label = int(np.argmax(prediction))
 
+        # Запись в историю
         request_history.append({
             "filename": file.filename,
             "true_label": true_label,
@@ -105,11 +131,16 @@ async def predict(file: UploadFile = File(...), true_label: int = Form(...)):
     except Exception as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
 
-@app.get("/history", response_model=List[PredictionRecord])
+@app.get("/history",
+         response_model=List[PredictionRecord],
+         summary="История предсказаний",
+         description="Возвращает историю всех запросов к /predict")
 async def get_history():
     return request_history
 
-@app.delete("/history")
+@app.delete("/history",
+            summary="Очистка истории предсказаний",
+            description="Удаляет все предыдущие предсказания из истории")
 async def clear_history():
     request_history.clear()
     return {"message": "История успешно очищена"}
@@ -117,12 +148,21 @@ async def clear_history():
 
 ### 4. Локальный запуск в Colab
 
+- nohup и & — запускают сервер в фоне (чтобы не блокировал ячейки).
+- --reload — автообновление при изменении кода.
+- 
 ```bash
 !nohup uvicorn main:app --reload &
 !cat nohup.out
 ```
 
 ### 5. Тестирование
+
+- Проверка /health
+- Отправка случайного изображения из тестовой выборки на /predict
+- Отображение изображения с фактической меткой
+- Получение истории /history
+- Очистка истории /history (DELETE)
 
 ```python
 import requests
